@@ -1,6 +1,6 @@
 package HbaseSparkQL
 
-import com.HbaseSparkQL.FeatureHelper.{vector_addition}
+import HbaseSparkQL.FeatureHelper.{vector_addition}
 import org.apache.spark.mllib.linalg.{Vector, Vectors, VectorUDT, SparseVector}
 import org.apache.spark.sql.expressions.MutableAggregationBuffer
 import org.apache.spark.sql.expressions.UserDefinedAggregateFunction

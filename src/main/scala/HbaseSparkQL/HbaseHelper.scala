@@ -17,13 +17,12 @@ import org.joda.time.Days
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
-import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.spark.HBaseContext
 import org.apache.hadoop.hbase.spark.KeyFamilyQualifier
 import org.apache.hadoop.hbase.{Cell, CellUtil, TableName, HBaseConfiguration, KeyValue}
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable
 import org.apache.hadoop.hbase.util.Bytes
-import org.apache.hadoop.hbase.client.{Delete, Get, HBaseAdmin, HTable, Put, Result, Scan, ConnectionFactory}
+import org.apache.hadoop.hbase.client.{ConnectionFactory, Delete, Get, HBaseAdmin, Put, Result, Scan, Table}
 import org.apache.hadoop.hbase.filter.{ColumnRangeFilter, FamilyFilter, FilterList, ValueFilter, BinaryComparator, RegexStringComparator}
 import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp
 import org.apache.hadoop.io.{LongWritable, Text}
@@ -39,11 +38,10 @@ import org.apache.spark.mllib.linalg.{Vectors,Vector}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.Column
 import org.apache.spark.sql.DataFrame
-import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.Row
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.SQLContext
 import java.io.IOException
 
 package object HbaseHelper extends Serializable{
@@ -51,7 +49,9 @@ package object HbaseHelper extends Serializable{
     // constants
     val default_batch_size = 1000
     val hadoop_core_site_path = Configs.get("HbaseHelper.hadoop_core_site_path")
-    val hbase_site_path = Configs.get("HbaseHelper.config_path")
+    val hbase_site_path = Configs.get("HbaseHelper.hbase_site_path")
+    val hadoop_metrics2_hbase_properties = Configs.get("HbaseHelper.hadoop_metrics2_hbase_properties")
+    val hadoop_metrics2_properies = Configs.get("HbaseHelper.hadoop_metrics2_properties")
     val HQL_reserved_words = Map(
         "get" -> Array(
             "from",
@@ -92,14 +92,22 @@ package object HbaseHelper extends Serializable{
     case class output_string(output:String)
     case class keyed_output(id:String, output:String)
         
-    // set HBase configs
+
+
+    // // Instantiating hbase configuration & connection & admin.
+    // val conf = HBaseConfiguration.create()
+    // conf.addResource(new Path(hadoop_core_site_path))
+    // val conn = ConnectionFactory.createConnection(conf)
+    // val admin = conn.getAdmin() // instantiate admin.
+
+    // create an hbase context for the query engine.
+    // input: 
+    //        sc: a SparkContext
     @throws(classOf[Exception])
-    def hbase_init(sc:SparkContext): HBaseContext ={
-        // initialize HBase Context
-        val conf = HBaseConfiguration.create();
-        conf.addResource(new Path(hadoop_core_site_path));
-        conf.addResource(new Path(hbase_site_path));
-        return new HBaseContext(sc, conf);
+    def create_hbase_context(sc:SparkContext): HBaseContext ={
+        // Instantiating hbase configuration & connection & admin.
+        val conf = HBaseConfiguration.create()
+        return new HBaseContext(sc, conf)
     }
     
     // create a table in hbase.
@@ -107,12 +115,12 @@ package object HbaseHelper extends Serializable{
     //       tableName: name of the table
     //       families: a sequence of the column families' names
     def create_table(tableName: String, families: Seq[String]) = {
-        // Create Hbase Configuration.
+        // Instantiating hbase configuration & connection & admin.
         val conf = HBaseConfiguration.create()
         conf.addResource(new Path(hadoop_core_site_path))
         conf.addResource(new Path(hbase_site_path))
-        // Instantiating HbaseAdmin class
-        val admin = new HBaseAdmin(conf)
+        val conn = ConnectionFactory.createConnection(conf)
+        val admin = conn.getAdmin() // instantiate admin.
         // Instantiating table descriptor class
         val tableDescriptor = new HTableDescriptor(TableName.valueOf(tableName))
         // Adding column families to table descriptor
@@ -128,16 +136,16 @@ package object HbaseHelper extends Serializable{
     // input:
     //       tableName: name of the table
     def delete_table(tableName: String) = {
-        // Instantiating configuration class
+        // Instantiating hbase configuration & connection & admin.
         val conf = HBaseConfiguration.create()
         conf.addResource(new Path(hadoop_core_site_path))
         conf.addResource(new Path(hbase_site_path))
-        // Instantiating HBaseAdmin class
-        val admin = new HBaseAdmin(conf)
+        val conn = ConnectionFactory.createConnection(conf)
+        val admin = conn.getAdmin() // instantiate admin.
         // disabling table
-        admin.disableTable(tableName)
+        admin.disableTable(TableName.valueOf(tableName))
         // Deleting table
-        admin.deleteTable(tableName)
+        admin.deleteTable(TableName.valueOf(tableName))
         System.out.println("Table deleted: " + tableName)
     }
     
@@ -213,8 +221,8 @@ package object HbaseHelper extends Serializable{
     //      rowPairsDF - the dataframe containing the pairs of row keys to merge.
     //      tableName - the name of the HBase Table.
     // The function merge of the records of rows to row1
-    def mergeRows(spark:SparkSession, hbaseContext:HBaseContext, rowPairsDF: Dataset[Row], tableName: String) = {
-        import spark.implicits._
+    def mergeRows(sc: SparkContext, sqlc:SQLContext, hbaseContext:HBaseContext, rowPairsDF: DataFrame, tableName: String) = {
+        import sqlc.implicits._
         val sepStr = universal_sepStr
         
         // protect against submitting same new rowkey & old rowkey.
@@ -222,10 +230,10 @@ package object HbaseHelper extends Serializable{
         
         
         if ( rowPairsDF_filt.rdd.isEmpty == false ) {
-            rowPairsDF_filt.select("row1").createOrReplaceTempView("row1_" + tableName)
-            rowPairsDF_filt.select("row2").createOrReplaceTempView("row2_" + tableName)
+            rowPairsDF_filt.select("row1").registerTempTable("row1_" + tableName)
+            rowPairsDF_filt.select("row2").registerTempTable("row2_" + tableName)
             val keyed_result2 = DistHQL(
-                    spark, hbaseContext, 
+                    sc, sqlc, hbaseContext, 
                     "GET FROM " + tableName + " " + 
                     "WITH row2_" + tableName + " " +
                     "WITH_KEYS row2"
@@ -242,16 +250,16 @@ package object HbaseHelper extends Serializable{
                     .map(r => r(0).asInstanceOf[String] + sepStr + r(1).asInstanceOf[String])
                     .map(s => output_string(s))
                     .toDF
-                trans_result.createOrReplaceTempView("trans_result_" + tableName)
+                trans_result.registerTempTable("trans_result_" + tableName)
                 // write row2 to row1                    
                 DistHQL(
-                    spark, hbaseContext,
+                    sc, sqlc, hbaseContext,
                     "PUT INTO " + tableName + " " + 
                     "WITH_RECORDS trans_result_" + tableName
                 )
                 // delete row2
                 DistHQL(
-                    spark, hbaseContext, 
+                    sc, sqlc, hbaseContext, 
                     "DELETE FROM " + tableName + " " +
                     "WITH row2_" + tableName + " " +
                     "WITH_KEYS row2"
@@ -295,12 +303,18 @@ package object HbaseHelper extends Serializable{
     //      3. SCAN is more useful if you want to search within all rows given the family & range of qualifiers
     //      4. If no output is needed, then an empty string dataframe will be returned.
     @throws(classOf[Exception])
-    def DistHQL( spark:SparkSession, hbaseContext:HBaseContext, HQL_string:String ): Dataset[Row] = {
-        import spark.implicits._
+    def DistHQL( sc:SparkContext, sqlc:SQLContext, hbaseContext:HBaseContext, HQL_string:String ): DataFrame = {
+        import sqlc.implicits._
         // constants
         val sep = universal_sepStr
         val pb_schema = StructType(Array(StructField("k", StringType, true)))
-        val empty_string_df = spark.createDataFrame(spark.sparkContext.emptyRDD[Row], pb_schema)
+        val empty_string_df = sqlc.createDataFrame(sc.emptyRDD[Row], pb_schema)
+        // Instantiating hbase configuration & connection & admin.
+        val conf = HBaseConfiguration.create()
+        conf.addResource(new Path(hadoop_core_site_path))
+        conf.addResource(new Path(hbase_site_path))
+        val conn = ConnectionFactory.createConnection(conf)
+        val admin = conn.getAdmin() // instantiate admin.
         // query settings
         val query_components = HQL_string.split(" +")
         val query_components_lowercase = query_components.map(c => c.toLowerCase)
@@ -365,7 +379,7 @@ package object HbaseHelper extends Serializable{
                     "Should attach keyword 'with' before the name of query table."
                 )
             }
-            querySpecTable = spark.sql("select * from " + querySpecTableName)
+            querySpecTable = sqlc.sql("select * from " + querySpecTableName)
         }
         // see family
         var family_str = ""
@@ -450,7 +464,7 @@ package object HbaseHelper extends Serializable{
 
         } else if (query_action == "get") {
             // row input
-            var row_input:Dataset[Row] = null
+            var row_input:DataFrame = null
             var row_input_cols: Seq[String] = Seq()
             // check filters
             var with_keys = false
@@ -600,7 +614,7 @@ package object HbaseHelper extends Serializable{
                 
         } else if (query_action == "delete") {
             // row input
-            var row_input:Dataset[Row] = null
+            var row_input:DataFrame = null
             var row_input_cols: Seq[String] = Seq()
             // see if row keys are given.
             var row_keys_name = ""
@@ -661,7 +675,7 @@ package object HbaseHelper extends Serializable{
             } else {
                 throw new HBaseHelperException("Should attach keyword 'with_records' before the given records.")
             }
-            val records = spark.sql("select * from " + records_name).rdd
+            val records = sqlc.sql("select * from " + records_name).rdd
                     .map(r => r(0).asInstanceOf[String])
                     .map(s => s.split(sep))
             // check if all records contains correct formats
@@ -683,19 +697,21 @@ package object HbaseHelper extends Serializable{
                             Seq((new KeyFamilyQualifier(Bytes.toBytes(r(0)), Bytes.toBytes(r(1)), Bytes.toBytes(r(2))), Bytes.toBytes(r(3)))).iterator
                         },
                         path_s);
-                val conf = HBaseConfiguration.create()
-                conf.addResource(new Path(Configs.get("HbaseHelper.config_path")))
+
+                // bulk load settings
+                conf.addResource(new Path(Configs.get("HbaseHelper.hbase_site_path")))
                 conf.setInt("hbase.client.operation.timeout", 3600000)
                 conf.setInt("hbase.rpc.timeout", 3600000)
-                val table = new HTable(conf, hbaseTableName)
+                val table = conn.getTable(TableName.valueOf(hbaseTableName))
+                val regionLocator = conn.getRegionLocator(TableName.valueOf(hbaseTableName))
                 val load = new LoadIncrementalHFiles(conf)
                 val fs = FileSystem.get(conf)
-                //Bulk load Hfiles to Hbase
+                //bulk load Hfiles to Hbase
                 var repeat = false
                 do {
                     try {
                         repeat = false
-                        load.doBulkLoad(path, table)
+                         load.doBulkLoad(path,admin,table,regionLocator)
                     }
                     catch {
                         case e: IOException => {
@@ -737,7 +753,7 @@ package object HbaseHelper extends Serializable{
         }  else if (query_action == "append") {
             // udaf for use.
             val AggToStringSet = new AggregateToSet("string")
-            spark.udf.register("agg_to_string_set", AggToStringSet)
+            sqlc.udf.register("agg_to_string_set", AggToStringSet)
                 
             var records_name = ""
             if (query_components_lowercase.contains("with_records") &&
@@ -747,7 +763,7 @@ package object HbaseHelper extends Serializable{
             } else {
                 throw new HBaseHelperException("Should attach keyword 'with_records' before the given records.")
             }
-            val records = spark.sql("select * from " + records_name).rdd
+            val records = sqlc.sql("select * from " + records_name).rdd
                 .map(r => r(0).asInstanceOf[String])
                 .map(s => s.split(sep))
             // check if all records contains correct formats
@@ -800,7 +816,7 @@ package object HbaseHelper extends Serializable{
             
             // groupBy to merge two datasets(in-order) 
             // TODO: Use reduceByKey when it's implemented in the future.
-            val union_records_df = records_df.union(old_records_df)
+            val union_records_df = records_df.unionAll(old_records_df)
             val merged_records_df = union_records_df
                 .map(r => 
                     (
@@ -833,13 +849,13 @@ package object HbaseHelper extends Serializable{
                 .map(t => ( t._1, t._2.mkString("") ))
                 .toDF("rowColfColq", "mergedValue")
                 .map(r => r.getAs[String]("rowColfColq") + sep + r.getAs[String]("mergedValue"))
-                .map(s => s.split(sep))
-            val merged_records = merged_records_df
+                .map(s => (s.split(sep)))
                 .map(arr => arr.mkString(sep))
-            merged_records.createOrReplaceTempView("merged_records_df")
+                .toDF("merged")
+            merged_records_df.registerTempTable("merged_records_df")
             // write merged records
             DistHQL(
-                spark, hbaseContext,
+                sc, sqlc, hbaseContext,
                 "PUT INTO " + hbaseTableName + " " + 
                 "WITH_RECORDS merged_records_df"
             )
@@ -849,13 +865,15 @@ package object HbaseHelper extends Serializable{
         return query_result
     }
     
-    def tableAvailable(tableName: String): Boolean = {
-        // Instantiating configuration class
+    def tableAvailable(tableName: String): Boolean = {   
+        // Instantiating hbase configuration & connection & admin.
         val conf = HBaseConfiguration.create()
         conf.addResource(new Path(hadoop_core_site_path))
         conf.addResource(new Path(hbase_site_path))
-        // Instantiating HBaseAdmin class
-        val admin = new HBaseAdmin(conf)
-        return admin.tableExists(tableName) && admin.isTableEnabled(tableName)
+        val conn = ConnectionFactory.createConnection(conf)
+        val admin = conn.getAdmin() // instantiate admin.  
+        return admin.tableExists(
+            TableName.valueOf(tableName)) && admin.isTableEnabled(TableName.valueOf(tableName)
+        )
     }
 }                                                                                                                                                                                                         

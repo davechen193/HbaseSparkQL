@@ -30,14 +30,6 @@ object Configs{
         day: Int = 0
     )
 
-    // Set Kafka args.
-    case class KafkaConfig(
-        sparkMaster: String = get("sparkMaster"),
-        outputHdfs: String = get("hadoop") + get("KafkaDefaultConfig.outputHdfs"),
-        kafkaBroker: String = get("KafkaDefaultConfig.kafkaIP") + ":" + get("KafkaDefaultConfig.kafkaPort"),
-        kafkaTopic: String = get("KafkaDefaultConfig.kafkaTopic"),
-        batchInterval: Int = getConf.getInt("KafkaDefaultConfig.batchInterval")
-    )
     // HDFS Data Ingest args.
     case class IngestConfig(
         backupDir: String,

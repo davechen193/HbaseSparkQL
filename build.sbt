@@ -6,42 +6,52 @@ version := "0.0.1"
 
 sbtVersion := "0.13.15"
 
-scalaVersion := "2.11.8"
+scalaVersion := "2.10.4"
 
 // dep versions
 val liftVersion = "2.6+"
 val jodaVersion = "2.9.4"
-val sparkVersion = "2.1.0"
+val sparkVersion = "1.6.0"
 val hadoopVersion = "2.7.1"
-val hbaseVersion = "1.2.3"
+val hbaseVersion = "2.0.0-alpha2"
+val hbaseThirdPartyVersion = "1.0.0"
 val htraceVersion = "3.1.0-incubating"
-// external jars
-val hbaseSparkJarLocation = "Please Include the Location of the Hbase-Spark Module Jar on your Disk!"
 // dependencies from maven repos.
 libraryDependencies ++= {
   Seq(
-    // general
+    // other
     "net.liftweb"		%%  "lift-json"			% liftVersion,
     "joda-time" 		%  "joda-time" 			% jodaVersion,
     // spark
     "org.apache.spark"  	%% "spark-core"			% sparkVersion	% "provided",
-    "org.apache.spark"  	%% "spark-sql"			% sparkVersion,
-    "org.apache.spark"		%% "spark-mllib"		% sparkVersion,
-    "org.apache.spark" 		%% "spark-streaming" 		% sparkVersion,
-    "org.apache.spark"		% "spark-streaming-kafka-0-8_2.11" 	% sparkVersion,
+    "org.apache.spark"  	%% "spark-sql"			% sparkVersion  % "provided",
+    "org.apache.spark"    %% "spark-mllib"    % sparkVersion  % "provided",
+    // hadoop
+    // "org.apache.hadoop"   % "hadoop-client"     % hadoopVersion  % "provided",
+    // "org.apache.hadoop" 	% "hadoop-common" 		% hadoopVersion  % "provided",
+    // "org.apache.hadoop"   % "hadoop-mapreduce-client-core"     % hadoopVersion  % "provided",
     // hbase
-    "org.apache.hbase" 		%  "hbase-annotations" 		% hbaseVersion,
-    "org.apache.hbase" 		%  "hbase-client" 		% hbaseVersion,
-    "org.apache.hbase" 		%  "hbase-common" 		% hbaseVersion,
-    "org.apache.hbase" 		%  "hbase-hadoop-compat" 	% hbaseVersion,
-    "org.apache.hbase"		%  "hbase-protocol" 		% hbaseVersion,
-    "org.apache.hbase" 		%  "hbase-server" 		% hbaseVersion,
-    "org.apache.hbase" 		%  "hbase-spark" 		% hbaseVersion	from hbaseSparkJarLocation,
+    "org.apache.hbase" 		%  "hbase-annotations" 		% hbaseVersion  % "provided",
+    "org.apache.hbase" 		%  "hbase-client" 		% hbaseVersion % "provided",
+    "org.apache.hbase" 		%  "hbase-common" 		% hbaseVersion % "provided",
+    "org.apache.hbase"          %  "hbase-hadoop-compat"        % hbaseVersion % "provided",
+    "org.apache.hbase" 		%  "hbase-hadoop2-compat" 	% hbaseVersion  % "provided",
+    "org.apache.hbase"          %  "hbase-metrics"              % hbaseVersion  % "provided",
+    "org.apache.hbase"          %  "hbase-metrics-api"          % hbaseVersion  % "provided", 
+    "org.apache.hbase"		%  "hbase-protocol" 		% hbaseVersion  % "provided",
+    "org.apache.hbase"          %  "hbase-protocol-shaded"      % hbaseVersion  % "provided",
+    "org.apache.hbase"          %  "hbase-server"		% hbaseVersion % "provided",
+    "org.apache.hbase"          %  "hbase-shaded-client"        % hbaseVersion  % "provided",
+    "org.apache.hbase"          %  "hbase-shaded-server"        % hbaseVersion  % "provided",
+    "org.apache.hbase" 		%  "hbase-spark" 		% hbaseVersion  % "provided",
+    "org.apache.hbase.thirdparty" % "hbase-shaded-miscellaneous"  % hbaseThirdPartyVersion,
+    "org.apache.hbase.thirdparty" % "hbase-shaded-netty"          % hbaseThirdPartyVersion,
     // htrace
     "org.apache.htrace" 	%  "htrace-core" 		% htraceVersion,
     // utilities
     "org.scalatest" 	    %% "scalatest" 		    % "2.2.6" % "test",
-    "com.typesafe"          %  "config"             % "1.2.1"
+    "com.typesafe"        %  "config"             % "1.2.1",
+    "com.google.guava"    %  "guava"              % "11.0.2"
   )
 }
 
@@ -58,7 +68,6 @@ resolvers ++= Seq(
   "Typesafe repository" at "http://repo.typesafe.com/typesafe/releases/",
   "Second Typesafe repo" at "http://repo.typesafe.com/typesafe/maven-releases/",
   "Mesosphere Public Repository" at "http://downloads.mesosphere.io/maven",
-  "Spark Artifacts Repository" at "https://mvnrepository.com/artifact/org.apache.spark/",
   "Databricks Repository" at "https://mvnrepository.com/artifact/databricks/",
   Resolver.sonatypeRepo("public")
 )
